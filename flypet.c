@@ -3,7 +3,9 @@
 #include <input/input.h>
 
 #define NEURON_COUNT 8
-#define SYNAPSE_COUNT 10
+// ===== INICIO CAMBIO: espacio para la conexion recurrente =====
+#define SYNAPSE_COUNT 11
+// ===== FIN CAMBIO: espacio para la conexion recurrente =====
 #define REFRACTORY_TICKS 1
 #define BRAIN_TICK_MS 200
 // ===== INICIO CAMBIO: intervalo del estimulo automatico =====
@@ -29,7 +31,9 @@ typedef struct {
 typedef struct {
     uint8_t source;
     uint8_t target;
-    uint8_t weight;
+    // ===== INICIO CAMBIO: pesos con signo para permitir inhibicion =====
+    int16_t weight;
+    // ===== FIN CAMBIO: pesos con signo para permitir inhibicion =====
 } Synapse;
 
 typedef struct{
@@ -66,13 +70,18 @@ static void flypet_init_synapses(FlyPetApp* app){
     app->synapses[0] = (Synapse){0, 1, 35};
     app->synapses[1] = (Synapse){0, 2, 25};
     app->synapses[2] = (Synapse){1, 3, 35};
-    app->synapses[3] = (Synapse){2, 3, 20};
+    // ===== INICIO CAMBIO: conexion inhibitoria N2 hacia N3 =====
+    app->synapses[3] = (Synapse){2, 3, -20};
+    // ===== FIN CAMBIO: conexion inhibitoria N2 hacia N3 =====
     app->synapses[4] = (Synapse){2, 4, 40};
     app->synapses[5] = (Synapse){3, 5, 30};
     app->synapses[6] = (Synapse){4, 5, 25};
     app->synapses[7] = (Synapse){5, 6, 35};
     app->synapses[8] = (Synapse){6, 7, 30};
     app->synapses[9] = (Synapse){1, 4, 15};
+    // ===== INICIO CAMBIO: N4 devuelve actividad a N0 =====
+    app->synapses[10] = (Synapse){4, 0, 60};
+    // ===== FIN CAMBIO: N4 devuelve actividad a N0 =====
 }
 
 static void flypet_stimulate(FlyPetApp* app){
@@ -267,11 +276,12 @@ int32_t flypet_app(void* p) {
 
     FlyPetApp app;
     app.show_spike_counts = false;
-    // ===== INICIO CAMBIO: comenzar en el centro con AUTO apagado =====
-    app.position = POSITION_MAX / 2;
+    // ===== INICIO CAMBIO: prueba recurrente desde el contacto izquierdo =====
+    // Posicion temporal de prueba: observar N0 sin UP ni AUTO.
+    app.position = 0;
     app.auto_stimulus_enabled = false;
     app.auto_stimulus_remaining = AUTO_STIMULUS_TICKS;
-    // ===== FIN CAMBIO: comenzar en el centro con AUTO apagado =====
+    // ===== FIN CAMBIO: prueba recurrente desde el contacto izquierdo =====
 
     app.input_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
     app.view_port = view_port_alloc();
