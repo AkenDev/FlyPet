@@ -6,6 +6,11 @@
 #define SYNAPSE_COUNT 10
 #define REFRACTORY_TICKS 1
 #define BRAIN_TICK_MS 200
+// ===== INICIO CAMBIO: salidas neuronales y limites de movimiento =====
+#define OUTPUT_LEFT_NEURON 3
+#define OUTPUT_RIGHT_NEURON 4
+#define POSITION_MAX 20
+// ===== FIN CAMBIO: salidas neuronales y limites de movimiento =====
 
 typedef struct {
     int16_t potential;
@@ -26,6 +31,9 @@ typedef struct{
     ViewPort* view_port;
     Gui* gui;
     bool show_spike_counts;
+    // ===== INICIO CAMBIO: posicion del marcador =====
+    int16_t position;
+    // ===== FIN CAMBIO: posicion del marcador =====
 
     Neuron neurons[NEURON_COUNT];
     Synapse synapses[SYNAPSE_COUNT];
@@ -118,6 +126,22 @@ static void flypet_step_network(FlyPetApp* app) {
     app->tick++;
 }
 
+// ===== INICIO CAMBIO: convertir disparos en movimiento =====
+static void flypet_update_position(FlyPetApp* app) {
+    int16_t movement =
+        (int16_t)app->neurons[OUTPUT_RIGHT_NEURON].fired -
+        (int16_t)app->neurons[OUTPUT_LEFT_NEURON].fired;
+
+    // Sumamos ambos efectos antes de limitar: dos disparos se cancelan.
+    app->position += movement;
+    if(app->position < 0) {
+        app->position = 0;
+    } else if(app->position > POSITION_MAX) {
+        app->position = POSITION_MAX;
+    }
+}
+// ===== FIN CAMBIO: convertir disparos en movimiento =====
+
 static void flypet_draw_callback(Canvas* canvas, void* ctx) {
     FlyPetApp* app = ctx;
 
@@ -149,7 +173,9 @@ static void flypet_draw_callback(Canvas* canvas, void* ctx) {
             }
         } else {
             x = 2 + (i % 4) * 32;
-            y = 25 + (i / 4) * 18;
+            // ===== INICIO CAMBIO: espacio para la pista de movimiento =====
+            y = 18 + (i / 4) * 10;
+            // ===== FIN CAMBIO: espacio para la pista de movimiento =====
             snprintf(
                 buffer,
                 sizeof(buffer),
@@ -162,6 +188,19 @@ static void flypet_draw_callback(Canvas* canvas, void* ctx) {
         
         canvas_draw_str(canvas, x, y, buffer);
     }
+
+    // ===== INICIO CAMBIO: visualizar la salida neuronal =====
+    if(!show_spike_counts) {
+        const int16_t position = app->position;
+        const uint8_t marker_x = 14 + position * 5;
+        canvas_draw_line(canvas, 14, 38, 114, 38);
+        canvas_draw_line(canvas, 14, 35, 14, 41);
+        canvas_draw_line(canvas, 114, 35, 114, 41);
+        canvas_draw_box(canvas, marker_x - 2, 36, 5, 5);
+        snprintf(buffer, sizeof(buffer), "N3 <  P:%d  > N4", position);
+        canvas_draw_str(canvas, 14, 49, buffer);
+    }
+    // ===== FIN CAMBIO: visualizar la salida neuronal =====
 
     snprintf(
         buffer,
@@ -184,6 +223,9 @@ int32_t flypet_app(void* p) {
 
     FlyPetApp app;
     app.show_spike_counts = false;
+    // ===== INICIO CAMBIO: comenzar en el centro =====
+    app.position = POSITION_MAX / 2;
+    // ===== FIN CAMBIO: comenzar en el centro =====
 
     app.input_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
     app.view_port = view_port_alloc();
@@ -226,6 +268,9 @@ int32_t flypet_app(void* p) {
         if(running && (uint32_t)(furi_get_tick() - last_brain_tick) >= brain_interval) {
             last_brain_tick += brain_interval;
             flypet_step_network(&app);
+            // ===== INICIO CAMBIO: aplicar una salida por tick =====
+            flypet_update_position(&app);
+            // ===== FIN CAMBIO: aplicar una salida por tick =====
             view_port_update(app.view_port);
         }
     }
