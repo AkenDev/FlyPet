@@ -55,7 +55,9 @@ static void flypet_init_network(FlyPetApp* app) {
 }
 
 static void flypet_init_synapses(FlyPetApp* app){
-    app->synapses[0] = (Synapse){0, 1, 30};
+    // ===== INICIO CAMBIO: diferenciar el ritmo de las ramas neuronales =====
+    app->synapses[0] = (Synapse){0, 1, 35};
+    // ===== FIN CAMBIO: diferenciar el ritmo de las ramas neuronales =====
     app->synapses[1] = (Synapse){0, 2, 25};
     app->synapses[2] = (Synapse){1, 3, 35};
     app->synapses[3] = (Synapse){2, 3, 20};
