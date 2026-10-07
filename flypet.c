@@ -4,14 +4,15 @@
 
 #define NEURON_COUNT 8
 #define SYNAPSE_COUNT 10
-//Inicio: Velocidad del cerebro
+#define REFRACTORY_TICKS 1
 #define BRAIN_TICK_MS 200
-// Fin: Velocidad del cerebro
 
 typedef struct {
     int16_t potential;
     uint16_t threshold;
     bool fired;
+    uint32_t spike_count;
+    uint8_t refractory_remaining;
 } Neuron;
 
 typedef struct {
@@ -24,11 +25,13 @@ typedef struct{
     FuriMessageQueue* input_queue;
     ViewPort* view_port;
     Gui* gui;
+    bool show_spike_counts;
 
     Neuron neurons[NEURON_COUNT];
     Synapse synapses[SYNAPSE_COUNT];
 
-    uint8_t tick;
+    uint32_t tick;
+
 } FlyPetApp;
 
 static void flypet_init_network(FlyPetApp* app) {
@@ -36,6 +39,8 @@ static void flypet_init_network(FlyPetApp* app) {
         app->neurons[i].potential = 0;
         app->neurons[i].threshold = 50;
         app->neurons[i].fired = false;
+        app->neurons[i].spike_count = 0;
+        app->neurons[i].refractory_remaining = 0;
     }
 
     app->tick = 0;
@@ -55,6 +60,9 @@ static void flypet_init_synapses(FlyPetApp* app){
 }
 
 static void flypet_stimulate(FlyPetApp* app){
+    if(app->neurons[0].refractory_remaining > 0) {
+        return;
+    }
     app-> neurons[0].potential += 60;
 
     if(app->neurons[0].potential > 100){
@@ -66,7 +74,9 @@ static void flypet_step_network(FlyPetApp* app) {
     int16_t incoming[NEURON_COUNT] = {0};
 
     for(uint8_t i = 0; i < NEURON_COUNT; i++) {
-        app->neurons[i].fired = app->neurons[i].potential >= app->neurons[i].threshold;
+        app->neurons[i].fired =
+            app->neurons[i].refractory_remaining == 0 &&
+            app->neurons[i].potential >= app->neurons[i].threshold;
     }
 
     for(uint8_t s = 0; s < SYNAPSE_COUNT; s++) {
@@ -79,12 +89,20 @@ static void flypet_step_network(FlyPetApp* app) {
     }
 
     for(uint8_t i = 0; i < NEURON_COUNT; i++) {
-        
-        if(app->neurons[i].fired){
+        if(app->neurons[i].fired) {
+            app->neurons[i].spike_count++;
             app->neurons[i].potential = 0;
-        } else {
-            app->neurons[i].potential = (app->neurons[i].potential * 8)/10;
+            app->neurons[i].refractory_remaining = REFRACTORY_TICKS;
+            continue;
         }
+
+        if(app->neurons[i].refractory_remaining > 0) {
+            app->neurons[i].refractory_remaining--;
+            app->neurons[i].potential = 0;
+            continue;
+        }
+
+        app->neurons[i].potential = (app->neurons[i].potential * 8)/10;
 
         app->neurons[i].potential += incoming[i];
 
@@ -101,34 +119,46 @@ static void flypet_step_network(FlyPetApp* app) {
 }
 
 static void flypet_draw_callback(Canvas* canvas, void* ctx) {
-    // Drawing code for the FlyPet app
     FlyPetApp* app = ctx;
 
     canvas_clear(canvas);
     canvas_set_font(canvas, FontPrimary);
     canvas_set_color(canvas, ColorBlack);
-    canvas_draw_str(canvas, 33, 9, "FlyPet LIF");
-    // Add more drawing logic here
+    const bool show_spike_counts = app->show_spike_counts;
+    canvas_draw_str(canvas, 2, 9, show_spike_counts ? "Disparos" : "FlyPet LIF");
 
     canvas_set_font(canvas, FontSecondary);
 
     char buffer[24];
 
     for(uint8_t i = 0; i < NEURON_COUNT; i++){
-        uint8_t column = i % 4;
-        uint8_t row = i / 4;
-
-        uint8_t x = 2 + (column * 32);
-        uint8_t y = 25 + (row * 18);
-
-        snprintf(
-            buffer,
-            sizeof(buffer),
-            "N%d:%d%s",
-            i,
-            app->neurons[i].potential,
-            app->neurons[i].fired ? "*" : ""
-        );
+        uint8_t x;
+        uint8_t y;
+        if(show_spike_counts) {
+            x = 2 + (i % 2) * 64;
+            y = 18 + (i / 2) * 10;
+            if(app->neurons[i].spike_count > 9999) {
+                snprintf(buffer, sizeof(buffer), "N%d:9999+", i);
+            } else {
+                snprintf(
+                    buffer,
+                    sizeof(buffer),
+                    "N%d:%lu",
+                    i,
+                    (unsigned long)app->neurons[i].spike_count);
+            }
+        } else {
+            x = 2 + (i % 4) * 32;
+            y = 25 + (i / 4) * 18;
+            snprintf(
+                buffer,
+                sizeof(buffer),
+                "N%d:%d%s",
+                i,
+                app->neurons[i].potential,
+                app->neurons[i].fired ? "*" :
+                    (app->neurons[i].refractory_remaining > 0 ? "R" : ""));
+        }
         
         canvas_draw_str(canvas, x, y, buffer);
     }
@@ -141,7 +171,7 @@ static void flypet_draw_callback(Canvas* canvas, void* ctx) {
     );
 
     canvas_draw_str(canvas, 3, 56, buffer);
-    canvas_draw_str(canvas, 4, 63, "UP stim OK Step");
+    canvas_draw_str(canvas, 4, 63, "UP stim OK vista");
 }
 
 static void flypet_input_callback(InputEvent* input_event, void* ctx) {
@@ -153,6 +183,7 @@ int32_t flypet_app(void* p) {
     UNUSED(p);
 
     FlyPetApp app;
+    app.show_spike_counts = false;
 
     app.input_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
     app.view_port = view_port_alloc();
@@ -169,33 +200,35 @@ int32_t flypet_app(void* p) {
 
     bool running = true;
 
-    // Inicio: relog automático del cerebro
+    InputEvent event;
+
+    const uint32_t brain_interval = furi_ms_to_ticks(BRAIN_TICK_MS);
+    uint32_t last_brain_tick = furi_get_tick();
+
     while(running) {
-        FuriStatus status= furi_message_queue_get(
-            app.input_queue,
-            &event,
-            BRAIN_TICK_MS
-        );
+        uint32_t elapsed = furi_get_tick() - last_brain_tick;
+        uint32_t wait_ticks = elapsed < brain_interval ? brain_interval - elapsed : 0;
 
-        if(status == FuriStatusOk){
-            //Recibimos un botón antes de que pasaron los 200ms.
-            if (event.type == InputTypePress){
-                if(event.key == InputKeyBack){
-                    running = false;
-                } else if(event.key == InputKeyUp){
-                    // Intectamos el estímulo con el botón UP a la neurona 0
-                    flupet_stimulate(&app);
+        FuriStatus status = furi_message_queue_get(app.input_queue, &event, wait_ticks);
 
-                    view_port_update(app.view_port);
-                }
+        if(status == FuriStatusOk && event.type == InputTypePress) {
+            if(event.key == InputKeyBack) {
+                running = false;
+            } else if(event.key == InputKeyUp) {
+                flypet_stimulate(&app);
+                view_port_update(app.view_port);
+            } else if(event.key == InputKeyOk) {
+                app.show_spike_counts = !app.show_spike_counts;
+                view_port_update(app.view_port);
             }
-        } else {
-            //No recibimos un botón antes de que pasaron los 200ms.
+        }
+        
+        if(running && (uint32_t)(furi_get_tick() - last_brain_tick) >= brain_interval) {
+            last_brain_tick += brain_interval;
             flypet_step_network(&app);
             view_port_update(app.view_port);
         }
     }
-    // Fin: relog automático del cerebro
 
     gui_remove_view_port(app.gui, app.view_port);
     view_port_free(app.view_port);
