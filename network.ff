@@ -1,0 +1,8 @@
+Filetype: FlyPet Network
+Version: 1
+NeuronCount: 5
+SynapseCount: 2
+Thresholds: 50 50 50 50 50
+Sources: 2 4
+Targets: 4 0
+Weights: 60 40

@@ -3,6 +3,7 @@
 #include <input/input.h>
 #include "brain.h"
 #include "network.h"
+#include "network_loader.h"
 
 #define BRAIN_TICK_MS 200
 #define AUTO_STIMULUS_TICKS 2
@@ -18,6 +19,7 @@ typedef struct{
     ViewPort* view_port;
     Gui* gui;
     bool show_spike_counts;
+    bool network_from_sd;
     bool auto_stimulus_enabled;
     uint8_t auto_stimulus_remaining;
     int16_t position;
@@ -126,6 +128,7 @@ static void flypet_draw_callback(Canvas* canvas, void* ctx) {
     );
 
     canvas_draw_str(canvas, 3, 56, buffer);
+    canvas_draw_str(canvas, 90, 56, app->network_from_sd ? "SD" : "ROM");
     canvas_draw_str(canvas, 2, 63, "UP:+ DOWN:auto OK:v");
 }
 
@@ -143,7 +146,13 @@ int32_t flypet_app(void* p) {
     app.auto_stimulus_enabled = false;
     app.auto_stimulus_remaining = AUTO_STIMULUS_TICKS;
 
-    if(!brain_init(&app.brain, &flypet_small_network)) {
+    NetworkDefinition network;
+    app.network_from_sd = network_load_file(FLYPET_NETWORK_PATH, &network) &&
+                          brain_init(&app.brain, &network);
+    if(!app.network_from_sd) {
+        FURI_LOG_W("FlyPet", "Network file unavailable or invalid; using built-in network");
+    }
+    if(!app.network_from_sd && !brain_init(&app.brain, &flypet_small_network)) {
         FURI_LOG_E("FlyPet", "Invalid network definition");
         return -1;
     }
